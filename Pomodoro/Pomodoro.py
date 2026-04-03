@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import time
 import random
 import io
@@ -49,21 +48,13 @@ def generate_notification_wav_base64():
 
 
 def play_notification_sound(sound_b64: str):
-    """Play embedded WAV sound in browser."""
-    components.html(
-        f"""
-        <audio id="pomodoro-audio" autoplay>
+    """Play embedded WAV sound without showing a visible component."""
+    audio_html = f"""
+        <audio autoplay style="display:none;">
             <source src="data:audio/wav;base64,{sound_b64}" type="audio/wav">
         </audio>
-        <script>
-            const audio = document.getElementById("pomodoro-audio");
-            if (audio) {{
-                audio.play().catch(err => console.log("Audio play blocked:", err));
-            }}
-        </script>
-        """,
-        height=0,
-    )
+    """
+    st.markdown(audio_html, unsafe_allow_html=True)
 
 
 # Generate sound once
