@@ -14,7 +14,6 @@ st.set_page_config(page_title="Pomodoro Timer", page_icon="🍅", layout="center
 # Helpers for embedded sound
 # -----------------------------
 def generate_notification_wav_base64():
-    """Generate a short 3-tone WAV notification and return as base64 string."""
     sample_rate = 44100
     tone_sequence = [
         (880, 0.15),
@@ -40,7 +39,7 @@ def generate_notification_wav_base64():
     wav_buffer = io.BytesIO()
     with wave.open(wav_buffer, 'wb') as wav_file:
         wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)  # 16-bit
+        wav_file.setsampwidth(2)
         wav_file.setframerate(sample_rate)
         wav_file.writeframes(b''.join(frames))
 
@@ -48,14 +47,12 @@ def generate_notification_wav_base64():
 
 
 def play_notification_sound(sound_b64: str):
-    """Play embedded WAV sound without showing a visible component."""
     audio_html = f"""
         <audio autoplay style="display:none;">
             <source src="data:audio/wav;base64,{sound_b64}" type="audio/wav">
         </audio>
     """
     st.markdown(audio_html, unsafe_allow_html=True)
-
 
 # Generate sound once
 NOTIFICATION_SOUND_B64 = generate_notification_wav_base64()
