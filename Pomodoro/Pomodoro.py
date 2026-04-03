@@ -16,7 +16,7 @@ if 'timer_running' not in st.session_state:
 if 'timer_type' not in st.session_state:
     st.session_state.timer_type = 'study'  # 'study' or 'break'
 if 'time_remaining' not in st.session_state:
-    st.session_state.time_remaining = 25 * 60  # 25 minutes in seconds
+    st.session_state.time_remaining = 25 * 60
 if 'completed_tasks' not in st.session_state:
     st.session_state.completed_tasks = []
 if 'incomplete_tasks' not in st.session_state:
@@ -29,11 +29,13 @@ if 'awaiting_progress_input' not in st.session_state:
     st.session_state.awaiting_progress_input = False
 if 'last_progress_value' not in st.session_state:
     st.session_state.last_progress_value = 0
+if 'play_sound' not in st.session_state:
+    st.session_state.play_sound = False
 
 # Constants
-STUDY_TIME = 25 * 60  # 25 minutes
-BREAK_TIME = 5 * 60   # 5 minutes
-EARLY_COMPLETION_BONUS = 2 * 60  # 2 minutes early = reward
+STUDY_TIME = 25 * 60
+BREAK_TIME = 5 * 60
+EARLY_COMPLETION_BONUS = 2 * 60
 
 # Rewards list
 REWARDS = [
@@ -56,8 +58,8 @@ ENCOURAGEMENTS = [
 
 def format_time(seconds):
     """Format seconds into MM:SS"""
-    mins = seconds // 60
-    secs = seconds % 60
+    mins = max(0, seconds) // 60
+    secs = max(0, seconds) % 60
     return f"{mins:02d}:{secs:02d}"
 
 def get_random_reward():
@@ -74,45 +76,45 @@ def play_notification_sound():
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (AudioContextClass) {
             const audioCtx = new AudioContextClass();
-            const durations = [0.15, 0.15, 0.25];
-            const freqs = [880, 988, 1319];
 
-            let startTime = audioCtx.currentTime;
-
-            freqs.forEach((freq, i) => {
+            const playBeep = (freq, start, duration) => {
                 const oscillator = audioCtx.createOscillator();
                 const gainNode = audioCtx.createGain();
 
                 oscillator.type = "sine";
-                oscillator.frequency.setValueAtTime(freq, startTime);
+                oscillator.frequency.setValueAtTime(freq, start);
 
-                gainNode.gain.setValueAtTime(0.0001, startTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.2, startTime + 0.01);
-                gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + durations[i]);
+                gainNode.gain.setValueAtTime(0.0001, start);
+                gainNode.gain.exponentialRampToValueAtTime(0.2, start + 0.01);
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, start + duration);
 
                 oscillator.connect(gainNode);
                 gainNode.connect(audioCtx.destination);
 
-                oscillator.start(startTime);
-                oscillator.stop(startTime + durations[i]);
+                oscillator.start(start);
+                oscillator.stop(start + duration);
+            };
 
-                startTime += durations[i] + 0.05;
-            });
+            const now = audioCtx.currentTime;
+            playBeep(880, now, 0.15);
+            playBeep(988, now + 0.20, 0.15);
+            playBeep(1319, now + 0.40, 0.25);
         }
         </script>
         """,
         height=0,
     )
 
+def trigger_sound():
+    st.session_state.play_sound = True
+
 def move_to_break():
-    """Switch to break mode."""
     st.session_state.timer_type = 'break'
     st.session_state.time_remaining = BREAK_TIME
     st.session_state.timer_running = False
     st.session_state.awaiting_progress_input = False
 
 def move_to_study():
-    """Switch to study mode."""
     st.session_state.timer_type = 'study'
     st.session_state.time_remaining = STUDY_TIME
     st.session_state.timer_running = False
@@ -121,10 +123,15 @@ def move_to_study():
 # Title
 st.title("🍅 Pomodoro Study Timer")
 
+# Play sound if triggered
+if st.session_state.play_sound:
+    play_notification_sound()
+    st.session_state.play_sound = False
+
 # Sidebar for task management
 with st.sidebar:
     st.header("📝 Task Management")
-    
+
     # Add new task
     new_task = st.text_input("Add a new task:", placeholder="Enter task description...")
     if st.button("➕ Add Task", use_container_width=True):
@@ -136,9 +143,17 @@ with st.sidebar:
                 'progress': 0
             })
             st.rerun()
-    
+
     st.divider()
-    
+
+    # Test sound button
+    st.subheader("🔊 Sound")
+    if st.button("Test sound", use_container_width=True):
+        trigger_sound()
+        st.rerun()
+
+    st.divider()
+
     # Display task queue
     st.subheader("📋 Task Queue")
     if st.session_state.tasks:
@@ -156,9 +171,9 @@ with st.sidebar:
                     st.rerun()
     else:
         st.info("No tasks yet. Add some tasks to get started!")
-    
+
     st.divider()
-    
+
     # Stats
     st.subheader("📊 Session Stats")
     st.metric("Pomodoros Completed", st.session_state.pomodoros_completed)
@@ -171,7 +186,7 @@ with col2:
     # Current task display
     if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
         current_task = st.session_state.tasks[st.session_state.current_task_index]
-        
+
         if st.session_state.timer_type == 'study':
             st.subheader("📚 Current Task:")
             if current_task.get('carried_over'):
@@ -191,9 +206,9 @@ with col2:
         else:
             st.subheader("☕ Break Time!")
             st.success("Relax and recharge!")
-    
+
     st.divider()
-    
+
     # Timer display
     timer_color = "#ff6347" if st.session_state.timer_type == 'study' else "#4CAF50"
     st.markdown(
@@ -209,34 +224,38 @@ with col2:
         """,
         unsafe_allow_html=True
     )
-    
+
     # Show reward if earned
     if st.session_state.show_reward:
         st.balloons()
         st.success(get_random_reward())
         st.session_state.show_reward = False
-    
+
     # Progress question after timer ends
     if st.session_state.awaiting_progress_input:
         st.divider()
         st.subheader("📈 Session Check-in")
         st.write("How far did you get with your task?")
-        
+
+        default_progress = st.session_state.last_progress_value
+        if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
+            default_progress = st.session_state.tasks[st.session_state.current_task_index].get('progress', 0)
+
         progress_value = st.slider(
             "Task progress",
             min_value=0,
             max_value=100,
-            value=st.session_state.last_progress_value,
+            value=default_progress,
             step=5
         )
-        
+
         if st.button("Submit progress", use_container_width=True, type="primary"):
             st.session_state.last_progress_value = progress_value
-            
+
             if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
                 current_task = st.session_state.tasks[st.session_state.current_task_index]
                 current_task['progress'] = progress_value
-                
+
                 if progress_value >= 100:
                     current_task['completed'] = True
                     st.session_state.completed_tasks.append(current_task['name'])
@@ -249,16 +268,16 @@ with col2:
                     if current_task['name'] not in st.session_state.incomplete_tasks:
                         st.session_state.incomplete_tasks.append(current_task['name'])
                     st.info(f"Progress saved: {progress_value}%. You'll continue this task next session.")
-            
+
             move_to_break()
             st.toast("⏰ Study session complete! Time for a break!", icon="☕")
             st.rerun()
-    
+
     st.divider()
-    
+
     # Control buttons
     btn_col1, btn_col2, btn_col3 = st.columns(3)
-    
+
     with btn_col1:
         start_pause_disabled = st.session_state.awaiting_progress_input
         if st.button(
@@ -269,23 +288,23 @@ with col2:
         ):
             st.session_state.timer_running = not st.session_state.timer_running
             st.rerun()
-    
+
     with btn_col2:
         reset_disabled = st.session_state.awaiting_progress_input
         if st.button("🔄 Reset", use_container_width=True, disabled=reset_disabled):
             st.session_state.time_remaining = STUDY_TIME if st.session_state.timer_type == 'study' else BREAK_TIME
             st.session_state.timer_running = False
             st.rerun()
-    
+
     with btn_col3:
         if st.session_state.timer_type == 'study':
             complete_disabled = st.session_state.awaiting_progress_input
             if st.button("✅ Complete", use_container_width=True, disabled=complete_disabled):
                 if st.session_state.time_remaining >= EARLY_COMPLETION_BONUS:
                     st.session_state.show_reward = True
-                
-                play_notification_sound()
-                
+
+                trigger_sound()
+
                 if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
                     completed_task = st.session_state.tasks[st.session_state.current_task_index]
                     completed_task['completed'] = True
@@ -294,7 +313,7 @@ with col2:
                     st.session_state.tasks.pop(st.session_state.current_task_index)
                     if st.session_state.current_task_index >= len(st.session_state.tasks):
                         st.session_state.current_task_index = 0
-                
+
                 st.session_state.pomodoros_completed += 1
                 move_to_break()
                 st.rerun()
@@ -307,22 +326,19 @@ with col2:
 if st.session_state.timer_running and not st.session_state.awaiting_progress_input:
     time.sleep(1)
     st.session_state.time_remaining -= 1
-    
-    if st.button("Test sound"):
-    play_notification_sound()
-    
+
     if st.session_state.time_remaining <= 0:
         st.session_state.timer_running = False
-        play_notification_sound()
-        
+        st.session_state.time_remaining = 0
+        trigger_sound()
+
         if st.session_state.timer_type == 'study':
             st.session_state.pomodoros_completed += 1
-            st.session_state.time_remaining = 0
             st.session_state.awaiting_progress_input = True
         else:
             move_to_study()
             st.toast("⏰ Break's over! Ready to focus!", icon="🍅")
-    
+
     st.rerun()
 
 # Footer with instructions
@@ -330,9 +346,10 @@ st.divider()
 with st.expander("ℹ️ How to use"):
     st.markdown("""
     1. **Add tasks** in the sidebar to track what you'll work on  
-    2. **Start the timer** to begin a 25-minute study session  
-    3. When the study timer ends, **log your progress** with the slider  
-    4. **100% = completed**, anything below that carries over to the next session  
-    5. **Take breaks** - 5-minute breaks help you stay fresh  
-    6. **Track progress** in the sidebar stats  
+    2. **Use 'Test sound'** to check whether audio works in your browser  
+    3. **Start the timer** to begin a 25-minute study session  
+    4. When the study timer ends, **log your progress** with the slider  
+    5. **100% = completed**, anything below that carries over to the next session  
+    6. **Take breaks** - 5-minute breaks help you stay fresh  
+    7. **Track progress** in the sidebar stats  
     """)
