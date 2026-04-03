@@ -2,11 +2,76 @@ import streamlit as st
 import streamlit.components.v1 as components
 import time
 import random
+import io
+import wave
+import math
+import struct
+import base64
 
 # Page config
 st.set_page_config(page_title="Pomodoro Timer", page_icon="🍅", layout="centered")
 
+# -----------------------------
+# Helpers for embedded sound
+# -----------------------------
+def generate_notification_wav_base64():
+    """Generate a short 3-tone WAV notification and return as base64 string."""
+    sample_rate = 44100
+    tone_sequence = [
+        (880, 0.15),
+        (988, 0.15),
+        (1319, 0.25),
+    ]
+    silence_between = 0.05
+    volume = 0.35
+
+    frames = []
+
+    for idx, (freq, duration) in enumerate(tone_sequence):
+        num_samples = int(sample_rate * duration)
+        for n in range(num_samples):
+            sample = volume * math.sin(2 * math.pi * freq * (n / sample_rate))
+            frames.append(struct.pack('<h', int(sample * 32767)))
+
+        if idx < len(tone_sequence) - 1:
+            silence_samples = int(sample_rate * silence_between)
+            for _ in range(silence_samples):
+                frames.append(struct.pack('<h', 0))
+
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, 'wb') as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)  # 16-bit
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b''.join(frames))
+
+    return base64.b64encode(wav_buffer.getvalue()).decode("utf-8")
+
+
+def play_notification_sound(sound_b64: str):
+    """Play embedded WAV sound in browser."""
+    components.html(
+        f"""
+        <audio id="pomodoro-audio" autoplay>
+            <source src="data:audio/wav;base64,{sound_b64}" type="audio/wav">
+        </audio>
+        <script>
+            const audio = document.getElementById("pomodoro-audio");
+            if (audio) {{
+                audio.play().catch(err => console.log("Audio play blocked:", err));
+            }}
+        </script>
+        """,
+        height=0,
+    )
+
+
+# Generate sound once
+NOTIFICATION_SOUND_B64 = generate_notification_wav_base64()
+
+# -----------------------------
 # Initialize session state
+# -----------------------------
 if 'tasks' not in st.session_state:
     st.session_state.tasks = []
 if 'current_task_index' not in st.session_state:
@@ -32,12 +97,13 @@ if 'last_progress_value' not in st.session_state:
 if 'play_sound' not in st.session_state:
     st.session_state.play_sound = False
 
+# -----------------------------
 # Constants
+# -----------------------------
 STUDY_TIME = 25 * 60
 BREAK_TIME = 5 * 60
 EARLY_COMPLETION_BONUS = 2 * 60
 
-# Rewards list
 REWARDS = [
     "🎉 Amazing! You're on fire! Take a victory stretch!",
     "⭐ Superstar! You completed that super fast!",
@@ -47,7 +113,6 @@ REWARDS = [
     "🌟 Stellar performance! You've earned a quick walk!",
 ]
 
-# Encouragement messages
 ENCOURAGEMENTS = [
     "💪 You've got this! Let's tackle it again!",
     "🌱 Progress, not perfection! Keep going!",
@@ -56,8 +121,10 @@ ENCOURAGEMENTS = [
     "🎯 Focus mode: activated! You can do it!",
 ]
 
+# -----------------------------
+# Utility functions
+# -----------------------------
 def format_time(seconds):
-    """Format seconds into MM:SS"""
     mins = max(0, seconds) // 60
     secs = max(0, seconds) % 60
     return f"{mins:02d}:{secs:02d}"
@@ -67,43 +134,6 @@ def get_random_reward():
 
 def get_random_encouragement():
     return random.choice(ENCOURAGEMENTS)
-
-def play_notification_sound():
-    """Play a short notification beep in the browser."""
-    components.html(
-        """
-        <script>
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (AudioContextClass) {
-            const audioCtx = new AudioContextClass();
-
-            const playBeep = (freq, start, duration) => {
-                const oscillator = audioCtx.createOscillator();
-                const gainNode = audioCtx.createGain();
-
-                oscillator.type = "sine";
-                oscillator.frequency.setValueAtTime(freq, start);
-
-                gainNode.gain.setValueAtTime(0.0001, start);
-                gainNode.gain.exponentialRampToValueAtTime(0.2, start + 0.01);
-                gainNode.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-
-                oscillator.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
-
-                oscillator.start(start);
-                oscillator.stop(start + duration);
-            };
-
-            const now = audioCtx.currentTime;
-            playBeep(880, now, 0.15);
-            playBeep(988, now + 0.20, 0.15);
-            playBeep(1319, now + 0.40, 0.25);
-        }
-        </script>
-        """,
-        height=0,
-    )
 
 def trigger_sound():
     st.session_state.play_sound = True
@@ -120,19 +150,22 @@ def move_to_study():
     st.session_state.timer_running = False
     st.session_state.awaiting_progress_input = False
 
+# -----------------------------
 # Title
+# -----------------------------
 st.title("🍅 Pomodoro Study Timer")
 
 # Play sound if triggered
 if st.session_state.play_sound:
-    play_notification_sound()
+    play_notification_sound(NOTIFICATION_SOUND_B64)
     st.session_state.play_sound = False
 
-# Sidebar for task management
+# -----------------------------
+# Sidebar
+# -----------------------------
 with st.sidebar:
     st.header("📝 Task Management")
 
-    # Add new task
     new_task = st.text_input("Add a new task:", placeholder="Enter task description...")
     if st.button("➕ Add Task", use_container_width=True):
         if new_task.strip():
@@ -146,15 +179,14 @@ with st.sidebar:
 
     st.divider()
 
-    # Test sound button
     st.subheader("🔊 Sound")
+    st.caption("Click this to test whether sound works in your browser.")
     if st.button("Test sound", use_container_width=True):
         trigger_sound()
         st.rerun()
 
     st.divider()
 
-    # Display task queue
     st.subheader("📋 Task Queue")
     if st.session_state.tasks:
         for i, task in enumerate(st.session_state.tasks):
@@ -174,16 +206,16 @@ with st.sidebar:
 
     st.divider()
 
-    # Stats
     st.subheader("📊 Session Stats")
     st.metric("Pomodoros Completed", st.session_state.pomodoros_completed)
     st.metric("Tasks Completed", len(st.session_state.completed_tasks))
 
+# -----------------------------
 # Main timer area
+# -----------------------------
 col1, col2, col3 = st.columns([1, 2, 1])
 
 with col2:
-    # Current task display
     if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
         current_task = st.session_state.tasks[st.session_state.current_task_index]
 
@@ -209,7 +241,6 @@ with col2:
 
     st.divider()
 
-    # Timer display
     timer_color = "#ff6347" if st.session_state.timer_type == 'study' else "#4CAF50"
     st.markdown(
         f"""
@@ -225,13 +256,11 @@ with col2:
         unsafe_allow_html=True
     )
 
-    # Show reward if earned
     if st.session_state.show_reward:
         st.balloons()
         st.success(get_random_reward())
         st.session_state.show_reward = False
 
-    # Progress question after timer ends
     if st.session_state.awaiting_progress_input:
         st.divider()
         st.subheader("📈 Session Check-in")
@@ -275,7 +304,6 @@ with col2:
 
     st.divider()
 
-    # Control buttons
     btn_col1, btn_col2, btn_col3 = st.columns(3)
 
     with btn_col1:
@@ -322,7 +350,9 @@ with col2:
                 move_to_study()
                 st.rerun()
 
+# -----------------------------
 # Timer logic
+# -----------------------------
 if st.session_state.timer_running and not st.session_state.awaiting_progress_input:
     time.sleep(1)
     st.session_state.time_remaining -= 1
@@ -341,7 +371,9 @@ if st.session_state.timer_running and not st.session_state.awaiting_progress_inp
 
     st.rerun()
 
-# Footer with instructions
+# -----------------------------
+# Footer
+# -----------------------------
 st.divider()
 with st.expander("ℹ️ How to use"):
     st.markdown("""
