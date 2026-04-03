@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import time
-from datetime import datetime
+import random
 
 # Page config
 st.set_page_config(page_title="Pomodoro Timer", page_icon="🍅", layout="centered")
@@ -25,6 +25,10 @@ if 'show_reward' not in st.session_state:
     st.session_state.show_reward = False
 if 'pomodoros_completed' not in st.session_state:
     st.session_state.pomodoros_completed = 0
+if 'awaiting_progress_input' not in st.session_state:
+    st.session_state.awaiting_progress_input = False
+if 'last_progress_value' not in st.session_state:
+    st.session_state.last_progress_value = 0
 
 # Constants
 STUDY_TIME = 25 * 60  # 25 minutes
@@ -57,11 +61,9 @@ def format_time(seconds):
     return f"{mins:02d}:{secs:02d}"
 
 def get_random_reward():
-    import random
     return random.choice(REWARDS)
 
 def get_random_encouragement():
-    import random
     return random.choice(ENCOURAGEMENTS)
 
 def play_notification_sound():
@@ -102,6 +104,20 @@ def play_notification_sound():
         height=0,
     )
 
+def move_to_break():
+    """Switch to break mode."""
+    st.session_state.timer_type = 'break'
+    st.session_state.time_remaining = BREAK_TIME
+    st.session_state.timer_running = False
+    st.session_state.awaiting_progress_input = False
+
+def move_to_study():
+    """Switch to study mode."""
+    st.session_state.timer_type = 'study'
+    st.session_state.time_remaining = STUDY_TIME
+    st.session_state.timer_running = False
+    st.session_state.awaiting_progress_input = False
+
 # Title
 st.title("🍅 Pomodoro Study Timer")
 
@@ -116,7 +132,8 @@ with st.sidebar:
             st.session_state.tasks.append({
                 'name': new_task.strip(),
                 'completed': False,
-                'carried_over': False
+                'carried_over': False,
+                'progress': 0
             })
             st.rerun()
     
@@ -129,7 +146,8 @@ with st.sidebar:
             col1, col2 = st.columns([4, 1])
             with col1:
                 status = "✅" if task['completed'] else "⏳" if task.get('carried_over') else "📌"
-                st.write(f"{status} {task['name']}")
+                progress_text = f" ({task.get('progress', 0)}%)" if task.get('progress', 0) > 0 and not task['completed'] else ""
+                st.write(f"{status} {task['name']}{progress_text}")
             with col2:
                 if st.button("🗑️", key=f"del_{i}"):
                     st.session_state.tasks.pop(i)
@@ -159,6 +177,8 @@ with col2:
             if current_task.get('carried_over'):
                 st.warning(f"**{current_task['name']}**")
                 st.caption(get_random_encouragement())
+                if current_task.get('progress', 0) > 0:
+                    st.caption(f"Previous progress: {current_task['progress']}%")
             else:
                 st.info(f"**{current_task['name']}**")
         else:
@@ -196,57 +216,95 @@ with col2:
         st.success(get_random_reward())
         st.session_state.show_reward = False
     
+    # Progress question after timer ends
+    if st.session_state.awaiting_progress_input:
+        st.divider()
+        st.subheader("📈 Session Check-in")
+        st.write("How far did you get with your task?")
+        
+        progress_value = st.slider(
+            "Task progress",
+            min_value=0,
+            max_value=100,
+            value=st.session_state.last_progress_value,
+            step=5
+        )
+        
+        if st.button("Submit progress", use_container_width=True, type="primary"):
+            st.session_state.last_progress_value = progress_value
+            
+            if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
+                current_task = st.session_state.tasks[st.session_state.current_task_index]
+                current_task['progress'] = progress_value
+                
+                if progress_value >= 100:
+                    current_task['completed'] = True
+                    st.session_state.completed_tasks.append(current_task['name'])
+                    st.session_state.tasks.pop(st.session_state.current_task_index)
+                    if st.session_state.current_task_index >= len(st.session_state.tasks):
+                        st.session_state.current_task_index = 0
+                    st.success("Nice — task completed!")
+                else:
+                    current_task['carried_over'] = True
+                    if current_task['name'] not in st.session_state.incomplete_tasks:
+                        st.session_state.incomplete_tasks.append(current_task['name'])
+                    st.info(f"Progress saved: {progress_value}%. You'll continue this task next session.")
+            
+            move_to_break()
+            st.toast("⏰ Study session complete! Time for a break!", icon="☕")
+            st.rerun()
+    
     st.divider()
     
     # Control buttons
     btn_col1, btn_col2, btn_col3 = st.columns(3)
     
     with btn_col1:
-        if st.button("▶️ Start" if not st.session_state.timer_running else "⏸️ Pause", 
-                     use_container_width=True, type="primary"):
+        start_pause_disabled = st.session_state.awaiting_progress_input
+        if st.button(
+            "▶️ Start" if not st.session_state.timer_running else "⏸️ Pause",
+            use_container_width=True,
+            type="primary",
+            disabled=start_pause_disabled
+        ):
             st.session_state.timer_running = not st.session_state.timer_running
             st.rerun()
     
     with btn_col2:
-        if st.button("🔄 Reset", use_container_width=True):
+        reset_disabled = st.session_state.awaiting_progress_input
+        if st.button("🔄 Reset", use_container_width=True, disabled=reset_disabled):
             st.session_state.time_remaining = STUDY_TIME if st.session_state.timer_type == 'study' else BREAK_TIME
             st.session_state.timer_running = False
             st.rerun()
     
     with btn_col3:
         if st.session_state.timer_type == 'study':
-            if st.button("✅ Complete", use_container_width=True):
-                # Check if completed early (2+ minutes remaining)
+            complete_disabled = st.session_state.awaiting_progress_input
+            if st.button("✅ Complete", use_container_width=True, disabled=complete_disabled):
                 if st.session_state.time_remaining >= EARLY_COMPLETION_BONUS:
                     st.session_state.show_reward = True
                 
-                # Play sound on manual completion
                 play_notification_sound()
                 
-                # Mark task as completed
                 if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
                     completed_task = st.session_state.tasks[st.session_state.current_task_index]
                     completed_task['completed'] = True
+                    completed_task['progress'] = 100
                     st.session_state.completed_tasks.append(completed_task['name'])
                     st.session_state.tasks.pop(st.session_state.current_task_index)
                     if st.session_state.current_task_index >= len(st.session_state.tasks):
                         st.session_state.current_task_index = 0
                 
-                # Switch to break
                 st.session_state.pomodoros_completed += 1
-                st.session_state.timer_type = 'break'
-                st.session_state.time_remaining = BREAK_TIME
-                st.session_state.timer_running = False
+                move_to_break()
                 st.rerun()
         else:
             if st.button("⏭️ Skip Break", use_container_width=True):
-                st.session_state.timer_type = 'study'
-                st.session_state.time_remaining = STUDY_TIME
-                st.session_state.timer_running = False
+                move_to_study()
                 st.rerun()
 
 # Timer logic
-if st.session_state.timer_running:
+if st.session_state.timer_running and not st.session_state.awaiting_progress_input:
     time.sleep(1)
     st.session_state.time_remaining -= 1
     
@@ -255,22 +313,11 @@ if st.session_state.timer_running:
         play_notification_sound()
         
         if st.session_state.timer_type == 'study':
-            # Study session ended - check if task was completed
-            if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
-                current_task = st.session_state.tasks[st.session_state.current_task_index]
-                if not current_task['completed']:
-                    # Mark as carried over for next session
-                    current_task['carried_over'] = True
-                    st.session_state.incomplete_tasks.append(current_task['name'])
-            
-            # Switch to break
-            st.session_state.timer_type = 'break'
-            st.session_state.time_remaining = BREAK_TIME
-            st.toast("⏰ Study session complete! Time for a break!", icon="☕")
+            st.session_state.pomodoros_completed += 1
+            st.session_state.time_remaining = 0
+            st.session_state.awaiting_progress_input = True
         else:
-            # Break ended - switch to study
-            st.session_state.timer_type = 'study'
-            st.session_state.time_remaining = STUDY_TIME
+            move_to_study()
             st.toast("⏰ Break's over! Ready to focus!", icon="🍅")
     
     st.rerun()
@@ -279,10 +326,10 @@ if st.session_state.timer_running:
 st.divider()
 with st.expander("ℹ️ How to use"):
     st.markdown("""
-    1. **Add tasks** in the sidebar to track what you'll work on
-    2. **Start the timer** to begin a 25-minute study session
-    3. **Complete tasks** - if you finish with 2+ minutes left, you get a reward! 🎉
-    4. **Incomplete tasks** carry over to the next session with encouragement
-    5. **Take breaks** - 5-minute breaks help you stay fresh
-    6. **Track progress** in the sidebar stats
+    1. **Add tasks** in the sidebar to track what you'll work on  
+    2. **Start the timer** to begin a 25-minute study session  
+    3. When the study timer ends, **log your progress** with the slider  
+    4. **100% = completed**, anything below that carries over to the next session  
+    5. **Take breaks** - 5-minute breaks help you stay fresh  
+    6. **Track progress** in the sidebar stats  
     """)
