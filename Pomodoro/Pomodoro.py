@@ -308,6 +308,9 @@ if st.session_state.timer_running and not st.session_state.awaiting_progress_inp
     time.sleep(1)
     st.session_state.time_remaining -= 1
     
+    if st.button("Test sound"):
+    play_notification_sound()
+    
     if st.session_state.time_remaining <= 0:
         st.session_state.timer_running = False
         play_notification_sound()
