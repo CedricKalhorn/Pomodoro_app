@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import time
 from datetime import datetime
 
@@ -62,6 +63,44 @@ def get_random_reward():
 def get_random_encouragement():
     import random
     return random.choice(ENCOURAGEMENTS)
+
+def play_notification_sound():
+    """Play a short notification beep in the browser."""
+    components.html(
+        """
+        <script>
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+            const audioCtx = new AudioContextClass();
+            const durations = [0.15, 0.15, 0.25];
+            const freqs = [880, 988, 1319];
+
+            let startTime = audioCtx.currentTime;
+
+            freqs.forEach((freq, i) => {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+
+                oscillator.type = "sine";
+                oscillator.frequency.setValueAtTime(freq, startTime);
+
+                gainNode.gain.setValueAtTime(0.0001, startTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.2, startTime + 0.01);
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + durations[i]);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.start(startTime);
+                oscillator.stop(startTime + durations[i]);
+
+                startTime += durations[i] + 0.05;
+            });
+        }
+        </script>
+        """,
+        height=0,
+    )
 
 # Title
 st.title("🍅 Pomodoro Study Timer")
@@ -181,6 +220,9 @@ with col2:
                 if st.session_state.time_remaining >= EARLY_COMPLETION_BONUS:
                     st.session_state.show_reward = True
                 
+                # Play sound on manual completion
+                play_notification_sound()
+                
                 # Mark task as completed
                 if st.session_state.tasks and st.session_state.current_task_index < len(st.session_state.tasks):
                     completed_task = st.session_state.tasks[st.session_state.current_task_index]
@@ -210,6 +252,7 @@ if st.session_state.timer_running:
     
     if st.session_state.time_remaining <= 0:
         st.session_state.timer_running = False
+        play_notification_sound()
         
         if st.session_state.timer_type == 'study':
             # Study session ended - check if task was completed
